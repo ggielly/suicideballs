@@ -2,6 +2,8 @@
 
 a simple 2d physics simulation in rust using sdl2.
 
+[image:suicide_balls.png]
+
 ## how to run
 
 - clone the repository
