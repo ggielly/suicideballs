@@ -1,6 +1,6 @@
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use crate::game::{World, GravityMode};
+use crate::game::{World, GravityMode, increase_balls_to_spawn, decrease_balls_to_spawn};
 
 pub fn process_input(event_pump: &mut sdl2::EventPump, world: &mut World) -> bool {
     for event in event_pump.poll_iter() {
@@ -20,6 +20,12 @@ pub fn process_input(event_pump: &mut sdl2::EventPump, world: &mut World) -> boo
                     GravityMode::Centripetal => GravityMode::Vertical,
                     GravityMode::Vertical => GravityMode::Centripetal,
                 };
+            },
+            Event::KeyDown { keycode: Some(Keycode::Plus) | Some(Keycode::Equals) | Some(Keycode::KpPlus), .. } => {
+                increase_balls_to_spawn(world);
+            },
+            Event::KeyDown { keycode: Some(Keycode::Minus) | Some(Keycode::KpMinus), .. } => {
+                decrease_balls_to_spawn(world);
             },
             _ => {}
         }

@@ -39,6 +39,7 @@ pub fn render(canvas: &mut Canvas<Window>, world: &World) -> Result<(), String> 
     let wall_col_text = format!("WALL COLS: {}", world.wall_collisions);
     let ball_col_text = format!("BALL COLS: {}", world.ball_collisions);
     let gravity_text = format!("GRAVITY: {:?}", world.gravity_mode).to_uppercase();
+    let spawn_text = format!("SPAWN: {}", world.balls_to_spawn);
 
 
     draw_text(canvas, &fps_text, HUD_X_OFFSET + 20, 20, 3, Color::WHITE)?;
@@ -47,6 +48,7 @@ pub fn render(canvas: &mut Canvas<Window>, world: &World) -> Result<(), String> 
     draw_text(canvas, &ball_col_text, HUD_X_OFFSET + 20, 110, 3, Color::WHITE)?;
     draw_text(canvas, &bounciness_text, HUD_X_OFFSET + 20, 140, 3, Color::WHITE)?;
     draw_text(canvas, &gravity_text, HUD_X_OFFSET + 20, 170, 3, Color::WHITE)?;
+    draw_text(canvas, &spawn_text, HUD_X_OFFSET + 20, 200, 3, Color::WHITE)?;
 
     canvas.present();
     Ok(())

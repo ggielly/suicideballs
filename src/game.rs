@@ -115,6 +115,7 @@ pub struct World {
     pub bounciness: f32,
     pub config: Config,
     pub gravity_mode: GravityMode,
+    pub balls_to_spawn: u32,
     // HUD Stats
     pub fps: u32,
     pub wall_collisions: u32,
@@ -123,7 +124,7 @@ pub struct World {
 
 pub fn initialize_world(config: Config) -> World {
     let mut balls = Vec::new();
-    for _ in 0..10 { // Start with 10 balls
+    for _ in 0..1 { // Start with 1 ball
         balls.push(create_random_ball(&config));
     }
     World {
@@ -132,6 +133,7 @@ pub fn initialize_world(config: Config) -> World {
         bounciness: 0.9, // Initial bounciness
         config,
         gravity_mode: GravityMode::Vertical,
+        balls_to_spawn: 2,
         fps: 0,
         wall_collisions: 0,
         ball_collisions: 0,
@@ -228,7 +230,7 @@ pub fn update_world(world: &mut World) {
 
 
     // Spawn new balls
-    for _ in 0..fallen_balls_count { // Changed from * 2 to * 1
+    for _ in 0..(fallen_balls_count as u32 * world.balls_to_spawn) as usize {
         if world.balls.len() < world.config.max_balls {
             world.balls.push(create_random_ball(&world.config));
         }
@@ -266,5 +268,16 @@ pub fn update_world(world: &mut World) {
                 ball_b.velocity = (ball_b.velocity - normal * (v2_dot_normal - v2_prime_dot)) * world.bounciness;
             }
         }
+    }
+}
+
+// Fonctions pour modifier le nombre de balles à générer
+pub fn increase_balls_to_spawn(world: &mut World) {
+    world.balls_to_spawn += 1;
+}
+
+pub fn decrease_balls_to_spawn(world: &mut World) {
+    if world.balls_to_spawn > 1 {
+        world.balls_to_spawn -= 1;
     }
 }
