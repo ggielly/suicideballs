@@ -113,6 +113,7 @@ pub struct World {
     pub balls: Vec<Ball>,
     pub circle_angle: f32,
     pub bounciness: f32,
+    pub friction: f32,
     pub config: Config,
     pub gravity_mode: GravityMode,
     pub balls_to_spawn: u32,
@@ -120,23 +121,25 @@ pub struct World {
     pub fps: u32,
     pub wall_collisions: u32,
     pub ball_collisions: u32,
+    pub total_wall_collisions: u64,
+    pub total_ball_collisions: u64,
 }
 
 pub fn initialize_world(config: Config) -> World {
-    let mut balls = Vec::new();
-    for _ in 0..1 { // Start with 1 ball
-        balls.push(create_random_ball(&config));
-    }
+    let balls = vec![create_random_ball(&config)]; // Start with 1 ball
     World {
         balls,
         circle_angle: 0.0,
-        bounciness: 0.9, // Initial bounciness
+        bounciness: 0.9,
+        friction: 0.995, // Légère friction pour stabiliser
         config,
         gravity_mode: GravityMode::Vertical,
         balls_to_spawn: 2,
         fps: 0,
         wall_collisions: 0,
         ball_collisions: 0,
+        total_wall_collisions: 0,
+        total_ball_collisions: 0,
     }
 }
 
@@ -169,7 +172,8 @@ pub fn update_world(world: &mut World) {
     world.wall_collisions = 0;
     world.ball_collisions = 0;
 
-    world.circle_angle += world.config.circle_rotation_speed;
+    // Garder l'angle borné pour éviter les problèmes de précision
+    world.circle_angle = (world.circle_angle + world.config.circle_rotation_speed) % (2.0 * std::f32::consts::PI);
 
     let circle_center = Vector2D { x: world.config.sim_width as f32 / 2.0, y: world.config.screen_height as f32 / 2.0 };
 
@@ -186,6 +190,7 @@ pub fn update_world(world: &mut World) {
         }
 
         ball.velocity = ball.velocity + ball.acceleration;
+        ball.velocity = ball.velocity * world.friction; // Appliquer friction
         ball.old_position = ball.position;
         ball.position = ball.position + ball.velocity;
         ball.acceleration = Vector2D::default();
@@ -208,10 +213,9 @@ pub fn update_world(world: &mut World) {
                 norm_ball_angle > norm_gap_start || norm_ball_angle < norm_gap_end
             };
 
-            if is_in_gap {
-                // Ball is in the gap, do nothing special for now
-            } else {
+            if !is_in_gap {
                 world.wall_collisions += 1;
+                world.total_wall_collisions += 1;
                 let normal = to_ball.normalized();
                 ball.position = circle_center + normal * (world.config.circle_radius - ball.radius);
                 let dot = ball.velocity.dot(normal);
@@ -229,8 +233,9 @@ pub fn update_world(world: &mut World) {
     let fallen_balls_count = initial_ball_count - world.balls.len();
 
 
-    // Spawn new balls
-    for _ in 0..(fallen_balls_count as u32 * world.balls_to_spawn) as usize {
+    // Spawn new balls - chaque balle tombée génère balls_to_spawn nouvelles balles
+    let balls_to_add = fallen_balls_count * world.balls_to_spawn as usize;
+    for _ in 0..balls_to_add {
         if world.balls.len() < world.config.max_balls {
             world.balls.push(create_random_ball(&world.config));
         }
@@ -248,6 +253,7 @@ pub fn update_world(world: &mut World) {
 
             if dist_sq < total_radius * total_radius && dist_sq > 0.0 {
                 world.ball_collisions += 1;
+                world.total_ball_collisions += 1;
                 let distance = dist_sq.sqrt();
                 let normal = axis / distance;
                 let overlap = 0.5 * (total_radius - distance);
@@ -264,8 +270,10 @@ pub fn update_world(world: &mut World) {
                 let v1_prime_dot = (v1_dot_normal * (m1 - m2) + 2.0 * m2 * v2_dot_normal) / (m1 + m2);
                 let v2_prime_dot = (v2_dot_normal * (m2 - m1) + 2.0 * m1 * v1_dot_normal) / (m1 + m2);
 
-                ball_a.velocity = (ball_a.velocity - normal * (v1_dot_normal - v1_prime_dot)) * world.bounciness;
-                ball_b.velocity = (ball_b.velocity - normal * (v2_dot_normal - v2_prime_dot)) * world.bounciness;
+                // Appliquer bounciness une seule fois (pas sur les deux composantes)
+                let restitution = world.bounciness.sqrt(); // Racine pour effet équivalent
+                ball_a.velocity = (ball_a.velocity - normal * (v1_dot_normal - v1_prime_dot)) * restitution;
+                ball_b.velocity = (ball_b.velocity - normal * (v2_dot_normal - v2_prime_dot)) * restitution;
             }
         }
     }

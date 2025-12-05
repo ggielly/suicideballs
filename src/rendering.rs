@@ -1,7 +1,7 @@
 use sdl2::pixels::Color;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
-use crate::game::{World, Vector2D, GravityMode};
+use crate::game::{World, Vector2D};
 
 const HUD_X_OFFSET: i32 = 600;
 
@@ -33,14 +33,13 @@ pub fn render(canvas: &mut Canvas<Window>, world: &World) -> Result<(), String> 
     canvas.draw_line((HUD_X_OFFSET, 0), (HUD_X_OFFSET, world.config.screen_height as i32))?;
 
     // Draw HUD text
-    let bounciness_text = format!("BOUNCE: {:.2}", world.bounciness);
-    let ball_count_text = format!("BALLS: {}", world.balls.len());
     let fps_text = format!("FPS: {}", world.fps);
-    let wall_col_text = format!("WALL COLS: {}", world.wall_collisions);
-    let ball_col_text = format!("BALL COLS: {}", world.ball_collisions);
+    let ball_count_text = format!("BALLS: {}", world.balls.len());
+    let wall_col_text = format!("WALL: {}", world.total_wall_collisions);
+    let ball_col_text = format!("BALL: {}", world.total_ball_collisions);
+    let bounciness_text = format!("BOUNCE: {:.2}", world.bounciness);
     let gravity_text = format!("GRAVITY: {:?}", world.gravity_mode).to_uppercase();
     let spawn_text = format!("SPAWN: {}", world.balls_to_spawn);
-
 
     draw_text(canvas, &fps_text, HUD_X_OFFSET + 20, 20, 3, Color::WHITE)?;
     draw_text(canvas, &ball_count_text, HUD_X_OFFSET + 20, 50, 3, Color::WHITE)?;

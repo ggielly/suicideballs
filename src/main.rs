@@ -1,6 +1,3 @@
-extern crate sdl2;
-extern crate rand;
-
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 
