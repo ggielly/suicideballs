@@ -3,6 +3,10 @@ use rand::Rng;
 use rand::rngs::ThreadRng;
 use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign};
 
+// Constantes précalculées pour éviter les appels répétés
+const PI: f32 = std::f32::consts::PI;
+const TWO_PI: f32 = 2.0 * PI;
+
 // --- Gravity ---
 #[derive(Debug)]
 pub enum GravityMode {
@@ -137,6 +141,7 @@ pub struct Ball {
 
 pub struct World {
     pub balls: Vec<Ball>,
+    pub circle_center: Vector2D, // Centre du cercle précalculé
     pub circle_angle: f32,
     pub bounciness: f32,
     pub friction: f32,
@@ -154,12 +159,17 @@ pub struct World {
 
 pub fn initialize_world(config: Config) -> World {
     let mut rng = rand::thread_rng();
-    let balls = vec![create_random_ball_with_rng(&config, &mut rng)];
+    let circle_center = Vector2D { 
+        x: config.sim_width as f32 / 2.0, 
+        y: config.screen_height as f32 / 2.0 
+    };
+    let balls = vec![create_random_ball_with_rng(&config, &mut rng, circle_center)];
     World {
         balls,
+        circle_center,
         circle_angle: 0.0,
         bounciness: 0.9,
-        friction: 0.995, // Légère friction pour stabiliser
+        friction: 0.995,
         config,
         gravity_mode: GravityMode::Vertical,
         balls_to_spawn: 2,
@@ -172,13 +182,13 @@ pub fn initialize_world(config: Config) -> World {
     }
 }
 
-fn create_random_ball_with_rng(config: &Config, rng: &mut ThreadRng) -> Ball {
+fn create_random_ball_with_rng(config: &Config, rng: &mut ThreadRng, circle_center: Vector2D) -> Ball {
     let radius = config.ball_radius;
     
-    // Spawn in a circle
-    let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
-    let dist = rng.gen_range(0.0..config.circle_radius - radius);
-    let circle_center = Vector2D { x: config.sim_width as f32 / 2.0, y: config.screen_height as f32 / 2.0 };
+    // Spawn dans le cercle avec distribution uniforme
+    let angle = rng.gen_range(0.0..TWO_PI);
+    let max_dist = config.circle_radius - radius - 10.0; // Marge de sécurité
+    let dist = rng.gen_range(0.0..max_dist).max(0.0);
 
     let position = Vector2D {
         x: circle_center.x + angle.cos() * dist,
@@ -201,24 +211,28 @@ pub fn update_world(world: &mut World) {
     world.ball_collisions = 0;
 
     // Garder l'angle borné pour éviter les problèmes de précision
-    world.circle_angle = (world.circle_angle + world.config.circle_rotation_speed) % (2.0 * std::f32::consts::PI);
+    world.circle_angle = (world.circle_angle + world.config.circle_rotation_speed) % TWO_PI;
 
-    let circle_center = Vector2D { x: world.config.sim_width as f32 / 2.0, y: world.config.screen_height as f32 / 2.0 };
+    let circle_center = world.circle_center;
+    let circle_radius = world.config.circle_radius;
+    let ball_radius = world.config.ball_radius;
+    let inner_radius = circle_radius - ball_radius;
+    let inner_radius_sq = inner_radius * inner_radius;
 
     // Ball physics and collision
     for ball in &mut world.balls {
         match world.gravity_mode {
             GravityMode::Centripetal => {
                 let to_center = circle_center - ball.position;
-                ball.acceleration = ball.acceleration + to_center.normalized() * world.config.centripetal_gravity;
+                ball.acceleration += to_center.normalized() * world.config.centripetal_gravity;
             },
             GravityMode::Vertical => {
-                ball.acceleration = ball.acceleration + Vector2D { x: 0.0, y: world.config.vertical_gravity };
+                ball.acceleration.y += world.config.vertical_gravity;
             }
         }
 
         ball.velocity += ball.acceleration;
-        ball.velocity *= world.friction; // Appliquer friction
+        ball.velocity *= world.friction;
         
         // Limiter la vitesse pour éviter le tunneling
         let speed_sq = ball.velocity.length_squared();
@@ -234,14 +248,14 @@ pub fn update_world(world: &mut World) {
         let to_ball = ball.position - circle_center;
         let dist_sq = to_ball.length_squared();
 
-        if dist_sq > (world.config.circle_radius - ball.radius).powi(2) {
+        if dist_sq > inner_radius_sq {
             let ball_angle = to_ball.y.atan2(to_ball.x);
-            let gap_start = world.circle_angle - world.config.circle_gap_angle / 2.0;
-            let gap_end = world.circle_angle + world.config.circle_gap_angle / 2.0;
+            let gap_start = world.circle_angle - world.config.circle_gap_angle * 0.5;
+            let gap_end = world.circle_angle + world.config.circle_gap_angle * 0.5;
 
-            let norm_ball_angle = (ball_angle + 2.0 * std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
-            let norm_gap_start = (gap_start + 2.0 * std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
-            let norm_gap_end = (gap_end + 2.0 * std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
+            let norm_ball_angle = (ball_angle + TWO_PI) % TWO_PI;
+            let norm_gap_start = (gap_start + TWO_PI) % TWO_PI;
+            let norm_gap_end = (gap_end + TWO_PI) % TWO_PI;
 
             let is_in_gap = if norm_gap_start < norm_gap_end {
                 norm_ball_angle > norm_gap_start && norm_ball_angle < norm_gap_end
@@ -253,27 +267,28 @@ pub fn update_world(world: &mut World) {
                 world.wall_collisions += 1;
                 world.total_wall_collisions += 1;
                 let normal = to_ball.normalized();
-                ball.position = circle_center + normal * (world.config.circle_radius - ball.radius);
+                ball.position = circle_center + normal * inner_radius;
                 let dot = ball.velocity.dot(normal);
-                ball.velocity = ball.velocity - normal * (2.0 * dot) * world.bounciness;
+                ball.velocity -= normal * (2.0 * dot * world.bounciness);
             }
         }
     }
 
     // Remove balls that are far outside the circle (fallen)
+    let removal_threshold_sq = (circle_radius + 50.0) * (circle_radius + 50.0);
     let initial_ball_count = world.balls.len();
     world.balls.retain(|ball| {
-        let dist_sq = (ball.position - circle_center).length_squared();
-        dist_sq < (world.config.circle_radius + 50.0).powi(2) // Remove if 50px away from circle
+        (ball.position - circle_center).length_squared() < removal_threshold_sq
     });
     let fallen_balls_count = initial_ball_count - world.balls.len();
 
-
     // Spawn new balls - chaque balle tombée génère balls_to_spawn nouvelles balles
-    let balls_to_add = fallen_balls_count * world.balls_to_spawn as usize;
-    for _ in 0..balls_to_add {
-        if world.balls.len() < world.config.max_balls {
-            let new_ball = create_random_ball_with_rng(&world.config, &mut world.rng);
+    if fallen_balls_count > 0 {
+        let balls_to_add = (fallen_balls_count * world.balls_to_spawn as usize)
+            .min(world.config.max_balls.saturating_sub(world.balls.len()));
+        world.balls.reserve(balls_to_add);
+        for _ in 0..balls_to_add {
+            let new_ball = create_random_ball_with_rng(&world.config, &mut world.rng, circle_center);
             world.balls.push(new_ball);
         }
     }

@@ -4,6 +4,7 @@ use sdl2::video::Window;
 use crate::game::{World, Vector2D};
 
 const HUD_X_OFFSET: i32 = 600;
+const TWO_PI: f32 = 2.0 * std::f32::consts::PI;
 
 pub fn render(canvas: &mut Canvas<Window>, world: &World) -> Result<(), String> {
     canvas.set_draw_color(Color::RGB(20, 20, 30));
@@ -12,10 +13,10 @@ pub fn render(canvas: &mut Canvas<Window>, world: &World) -> Result<(), String> 
     // Draw simulation items
     draw_arc(
         canvas,
-        Vector2D { x: world.config.sim_width as f32 / 2.0, y: world.config.screen_height as f32 / 2.0 },
+        world.circle_center,
         world.config.circle_radius,
-        world.circle_angle + world.config.circle_gap_angle / 2.0,
-        world.circle_angle - world.config.circle_gap_angle / 2.0 + 2.0 * std::f32::consts::PI,
+        world.circle_angle + world.config.circle_gap_angle * 0.5,
+        world.circle_angle - world.config.circle_gap_angle * 0.5 + TWO_PI,
         world.config.circle_thickness as i32,
         Color::RGB(200, 200, 220)
     )?;
@@ -328,15 +329,32 @@ fn draw_filled_circle(canvas: &mut Canvas<Window>, center_x: i32, center_y: i32,
 
 fn draw_arc(canvas: &mut Canvas<Window>, center: Vector2D, radius: f32, start_angle: f32, end_angle: f32, thickness: i32, color: Color) -> Result<(), String> {
     canvas.set_draw_color(color);
-    let step = 0.01;
+    // Pas adaptatif basé sur le rayon pour un rendu fluide
+    let step = (1.0 / radius).max(0.005).min(0.02);
+    let half_thickness = thickness as f32 * 0.5;
+    
     for i in 0..thickness {
-        let r = radius - (thickness as f32 / 2.0) + i as f32;
+        let r = radius - half_thickness + i as f32;
         let mut angle = start_angle;
+        
+        // Calculer le premier point
+        let (sin_a, cos_a) = angle.sin_cos();
+        let mut p1_x = center.x + r * cos_a;
+        let mut p1_y = center.y + r * sin_a;
+        
         while angle < end_angle {
-            let p1 = Vector2D { x: center.x + r * angle.cos(), y: center.y + r * angle.sin() };
-            let p2 = Vector2D { x: center.x + r * (angle + step).cos(), y: center.y + r * (angle + step).sin() };
-            canvas.draw_line((p1.x as i32, p1.y as i32), (p2.x as i32, p2.y as i32))?;
             angle += step;
+            let (sin_b, cos_b) = angle.sin_cos();
+            let p2_x = center.x + r * cos_b;
+            let p2_y = center.y + r * sin_b;
+            
+            canvas.draw_line(
+                (p1_x as i32, p1_y as i32),
+                (p2_x as i32, p2_y as i32)
+            )?;
+            
+            p1_x = p2_x;
+            p1_y = p2_y;
         }
     }
     Ok(())
