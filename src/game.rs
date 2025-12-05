@@ -1,6 +1,7 @@
 use sdl2::pixels::Color;
 use rand::Rng;
-use std::ops::{Add, Sub, Mul, Div};
+use rand::rngs::ThreadRng;
+use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign};
 
 // --- Gravity ---
 #[derive(Debug)]
@@ -22,6 +23,8 @@ pub struct Config {
     pub circle_rotation_speed: f32,
     pub circle_gap_angle: f32,
     pub ball_radius: f32,
+    pub max_velocity: f32, // Limite de vitesse pour éviter le tunneling
+    pub grid_cell_size: f32, // Taille des cellules de la grille spatiale
 }
 
 impl Default for Config {
@@ -38,6 +41,8 @@ impl Default for Config {
             circle_rotation_speed: 0.00665,
             circle_gap_angle: std::f32::consts::FRAC_PI_4,
             ball_radius: 15.0,
+            max_velocity: 15.0, // Limite de vitesse
+            grid_cell_size: 40.0, // ~2x le diamètre des balles
         }
     }
 }
@@ -74,6 +79,27 @@ impl Div<f32> for Vector2D {
     type Output = Self;
     fn div(self, scalar: f32) -> Self {
         Self { x: self.x / scalar, y: self.y / scalar }
+    }
+}
+
+impl AddAssign for Vector2D {
+    fn add_assign(&mut self, other: Self) {
+        self.x += other.x;
+        self.y += other.y;
+    }
+}
+
+impl SubAssign for Vector2D {
+    fn sub_assign(&mut self, other: Self) {
+        self.x -= other.x;
+        self.y -= other.y;
+    }
+}
+
+impl MulAssign<f32> for Vector2D {
+    fn mul_assign(&mut self, scalar: f32) {
+        self.x *= scalar;
+        self.y *= scalar;
     }
 }
 
@@ -117,6 +143,7 @@ pub struct World {
     pub config: Config,
     pub gravity_mode: GravityMode,
     pub balls_to_spawn: u32,
+    pub rng: ThreadRng, // RNG réutilisable
     // HUD Stats
     pub fps: u32,
     pub wall_collisions: u32,
@@ -126,7 +153,8 @@ pub struct World {
 }
 
 pub fn initialize_world(config: Config) -> World {
-    let balls = vec![create_random_ball(&config)]; // Start with 1 ball
+    let mut rng = rand::thread_rng();
+    let balls = vec![create_random_ball_with_rng(&config, &mut rng)];
     World {
         balls,
         circle_angle: 0.0,
@@ -135,6 +163,7 @@ pub fn initialize_world(config: Config) -> World {
         config,
         gravity_mode: GravityMode::Vertical,
         balls_to_spawn: 2,
+        rng,
         fps: 0,
         wall_collisions: 0,
         ball_collisions: 0,
@@ -143,8 +172,7 @@ pub fn initialize_world(config: Config) -> World {
     }
 }
 
-fn create_random_ball(config: &Config) -> Ball {
-    let mut rng = rand::thread_rng();
+fn create_random_ball_with_rng(config: &Config, rng: &mut ThreadRng) -> Ball {
     let radius = config.ball_radius;
     
     // Spawn in a circle
@@ -189,10 +217,18 @@ pub fn update_world(world: &mut World) {
             }
         }
 
-        ball.velocity = ball.velocity + ball.acceleration;
-        ball.velocity = ball.velocity * world.friction; // Appliquer friction
+        ball.velocity += ball.acceleration;
+        ball.velocity *= world.friction; // Appliquer friction
+        
+        // Limiter la vitesse pour éviter le tunneling
+        let speed_sq = ball.velocity.length_squared();
+        let max_vel = world.config.max_velocity;
+        if speed_sq > max_vel * max_vel {
+            ball.velocity *= max_vel / speed_sq.sqrt();
+        }
+        
         ball.old_position = ball.position;
-        ball.position = ball.position + ball.velocity;
+        ball.position += ball.velocity;
         ball.acceleration = Vector2D::default();
 
         let to_ball = ball.position - circle_center;
@@ -237,46 +273,119 @@ pub fn update_world(world: &mut World) {
     let balls_to_add = fallen_balls_count * world.balls_to_spawn as usize;
     for _ in 0..balls_to_add {
         if world.balls.len() < world.config.max_balls {
-            world.balls.push(create_random_ball(&world.config));
+            let new_ball = create_random_ball_with_rng(&world.config, &mut world.rng);
+            world.balls.push(new_ball);
         }
     }
 
-    // Ball-to-ball collision
-    let balls = &mut world.balls;
-    for i in 0..balls.len() {
-        let (left, right) = balls.split_at_mut(i + 1);
-        let ball_a = &mut left[i];
-        for ball_b in right {
-            let axis = ball_a.position - ball_b.position;
-            let dist_sq = axis.length_squared();
-            let total_radius = ball_a.radius + ball_b.radius;
-
-            if dist_sq < total_radius * total_radius && dist_sq > 0.0 {
-                world.ball_collisions += 1;
-                world.total_ball_collisions += 1;
-                let distance = dist_sq.sqrt();
-                let normal = axis / distance;
-                let overlap = 0.5 * (total_radius - distance);
-
-                ball_a.position = ball_a.position + normal * overlap;
-                ball_b.position = ball_b.position - normal * overlap;
-
-                let (v1, v2) = (ball_a.velocity, ball_b.velocity);
-                let (m1, m2) = (ball_a.radius * ball_a.radius, ball_b.radius * ball_b.radius);
-
-                let v1_dot_normal = v1.dot(normal);
-                let v2_dot_normal = v2.dot(normal);
-
-                let v1_prime_dot = (v1_dot_normal * (m1 - m2) + 2.0 * m2 * v2_dot_normal) / (m1 + m2);
-                let v2_prime_dot = (v2_dot_normal * (m2 - m1) + 2.0 * m1 * v1_dot_normal) / (m1 + m2);
-
-                // Appliquer bounciness une seule fois (pas sur les deux composantes)
-                let restitution = world.bounciness.sqrt(); // Racine pour effet équivalent
-                ball_a.velocity = (ball_a.velocity - normal * (v1_dot_normal - v1_prime_dot)) * restitution;
-                ball_b.velocity = (ball_b.velocity - normal * (v2_dot_normal - v2_prime_dot)) * restitution;
+    // Ball-to-ball collision avec grille spatiale
+    let cell_size = world.config.grid_cell_size;
+    let grid_width = (world.config.sim_width as f32 / cell_size).ceil() as usize + 1;
+    let grid_height = (world.config.screen_height as f32 / cell_size).ceil() as usize + 1;
+    let grid_size = grid_width * grid_height;
+    
+    // Construire la grille
+    let mut grid: Vec<Vec<usize>> = vec![Vec::new(); grid_size];
+    for (i, ball) in world.balls.iter().enumerate() {
+        let cx = ((ball.position.x / cell_size) as usize).min(grid_width - 1);
+        let cy = ((ball.position.y / cell_size) as usize).min(grid_height - 1);
+        grid[cy * grid_width + cx].push(i);
+    }
+    
+    // Vérifier les collisions seulement entre balles dans les cellules voisines
+    let bounciness = world.bounciness;
+    let restitution = bounciness.sqrt();
+    
+    for cy in 0..grid_height {
+        for cx in 0..grid_width {
+            let cell_idx = cy * grid_width + cx;
+            let cell_balls = &grid[cell_idx];
+            
+            // Collisions dans la même cellule
+            for i in 0..cell_balls.len() {
+                for j in (i + 1)..cell_balls.len() {
+                    let idx_a = cell_balls[i];
+                    let idx_b = cell_balls[j];
+                    if let Some(collision) = check_collision(&world.balls[idx_a], &world.balls[idx_b]) {
+                        world.ball_collisions += 1;
+                        world.total_ball_collisions += 1;
+                        resolve_collision(&mut world.balls, idx_a, idx_b, collision, restitution);
+                    }
+                }
+            }
+            
+            // Collisions avec cellules voisines (droite, bas, bas-droite, bas-gauche)
+            let neighbors = [
+                (cx + 1, cy),
+                (cx, cy + 1),
+                (cx + 1, cy + 1),
+                (cx.wrapping_sub(1), cy + 1),
+            ];
+            
+            for (nx, ny) in neighbors {
+                if nx < grid_width && ny < grid_height {
+                    let neighbor_idx = ny * grid_width + nx;
+                    for &idx_a in cell_balls {
+                        for &idx_b in &grid[neighbor_idx] {
+                            if let Some(collision) = check_collision(&world.balls[idx_a], &world.balls[idx_b]) {
+                                world.ball_collisions += 1;
+                                world.total_ball_collisions += 1;
+                                resolve_collision(&mut world.balls, idx_a, idx_b, collision, restitution);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/// Données de collision
+struct CollisionData {
+    normal: Vector2D,
+    overlap: f32,
+}
+
+/// Vérifie si deux balles sont en collision
+#[inline]
+fn check_collision(ball_a: &Ball, ball_b: &Ball) -> Option<CollisionData> {
+    let axis = ball_a.position - ball_b.position;
+    let dist_sq = axis.length_squared();
+    let total_radius = ball_a.radius + ball_b.radius;
+    
+    if dist_sq < total_radius * total_radius && dist_sq > 0.0 {
+        let distance = dist_sq.sqrt();
+        Some(CollisionData {
+            normal: axis / distance,
+            overlap: 0.5 * (total_radius - distance),
+        })
+    } else {
+        None
+    }
+}
+
+/// Résout une collision entre deux balles
+#[inline]
+fn resolve_collision(balls: &mut [Ball], idx_a: usize, idx_b: usize, collision: CollisionData, restitution: f32) {
+    let CollisionData { normal, overlap } = collision;
+    
+    // Séparer les balles
+    balls[idx_a].position += normal * overlap;
+    balls[idx_b].position -= normal * overlap;
+    
+    let v1 = balls[idx_a].velocity;
+    let v2 = balls[idx_b].velocity;
+    let m1 = balls[idx_a].radius * balls[idx_a].radius;
+    let m2 = balls[idx_b].radius * balls[idx_b].radius;
+    
+    let v1_dot_normal = v1.dot(normal);
+    let v2_dot_normal = v2.dot(normal);
+    
+    let v1_prime_dot = (v1_dot_normal * (m1 - m2) + 2.0 * m2 * v2_dot_normal) / (m1 + m2);
+    let v2_prime_dot = (v2_dot_normal * (m2 - m1) + 2.0 * m1 * v1_dot_normal) / (m1 + m2);
+    
+    balls[idx_a].velocity = (balls[idx_a].velocity - normal * (v1_dot_normal - v1_prime_dot)) * restitution;
+    balls[idx_b].velocity = (balls[idx_b].velocity - normal * (v2_dot_normal - v2_prime_dot)) * restitution;
 }
 
 // Fonctions pour modifier le nombre de balles à générer
