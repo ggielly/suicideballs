@@ -136,6 +136,8 @@ pub struct Ball {
     pub velocity: Vector2D,
     pub acceleration: Vector2D,
     pub radius: f32,
+    pub rotation: f32,          // Angle de rotation actuel (radians)
+    pub angular_velocity: f32,  // Vitesse de rotation (radians/frame)
     pub color: Color,
 }
 
@@ -168,8 +170,8 @@ pub fn initialize_world(config: Config) -> World {
         balls,
         circle_center,
         circle_angle: 0.0,
-        bounciness: 0.9,
-        friction: 0.995,
+        bounciness: 0.95,  // Augmenté pour plus de rebond
+        friction: 0.998,   // Moins de friction pour garder l'énergie
         config,
         gravity_mode: GravityMode::Vertical,
         balls_to_spawn: 2,
@@ -201,6 +203,8 @@ fn create_random_ball_with_rng(config: &Config, rng: &mut ThreadRng, circle_cent
         velocity: Vector2D { x: rng.gen_range(-2.0..2.0), y: rng.gen_range(-2.0..2.0) },
         acceleration: Vector2D::default(),
         radius,
+        rotation: rng.gen_range(0.0..TWO_PI),
+        angular_velocity: 0.0,
         color: Color::RGB(rng.gen_range(100..255), rng.gen_range(100..255), rng.gen_range(100..255)),
     }
 }
@@ -244,6 +248,10 @@ pub fn update_world(world: &mut World) {
         ball.old_position = ball.position;
         ball.position += ball.velocity;
         ball.acceleration = Vector2D::default();
+        
+        // Mettre à jour la rotation
+        ball.rotation = (ball.rotation + ball.angular_velocity) % TWO_PI;
+        ball.angular_velocity *= 0.995; // Friction angulaire légère
 
         let to_ball = ball.position - circle_center;
         let dist_sq = to_ball.length_squared();
@@ -268,8 +276,17 @@ pub fn update_world(world: &mut World) {
                 world.total_wall_collisions += 1;
                 let normal = to_ball.normalized();
                 ball.position = circle_center + normal * inner_radius;
-                let dot = ball.velocity.dot(normal);
-                ball.velocity -= normal * (2.0 * dot * world.bounciness);
+                
+                // Calculer la composante tangentielle pour la rotation
+                let tangent = Vector2D { x: -normal.y, y: normal.x };
+                let tangent_velocity = ball.velocity.dot(tangent);
+                
+                // Rebond normal
+                let normal_velocity = ball.velocity.dot(normal);
+                ball.velocity -= normal * (2.0 * normal_velocity * world.bounciness);
+                
+                // Transférer une partie de la vitesse tangentielle en rotation
+                ball.angular_velocity += tangent_velocity * 0.05 / ball.radius;
             }
         }
     }
@@ -390,14 +407,24 @@ fn resolve_collision(balls: &mut [Ball], idx_a: usize, idx_b: usize, collision: 
     
     let v1 = balls[idx_a].velocity;
     let v2 = balls[idx_b].velocity;
-    let m1 = balls[idx_a].radius * balls[idx_a].radius;
-    let m2 = balls[idx_b].radius * balls[idx_b].radius;
+    let r1 = balls[idx_a].radius;
+    let r2 = balls[idx_b].radius;
+    let m1 = r1 * r1;
+    let m2 = r2 * r2;
+    
+    // Calculer la tangente pour la rotation
+    let tangent = Vector2D { x: -normal.y, y: normal.x };
     
     let v1_dot_normal = v1.dot(normal);
     let v2_dot_normal = v2.dot(normal);
     
     let v1_prime_dot = (v1_dot_normal * (m1 - m2) + 2.0 * m2 * v2_dot_normal) / (m1 + m2);
     let v2_prime_dot = (v2_dot_normal * (m2 - m1) + 2.0 * m1 * v1_dot_normal) / (m1 + m2);
+    
+    // Transférer la vitesse tangentielle en rotation
+    let relative_tangent_vel = (v1 - v2).dot(tangent);
+    balls[idx_a].angular_velocity += relative_tangent_vel * 0.03 / r1;
+    balls[idx_b].angular_velocity -= relative_tangent_vel * 0.03 / r2;
     
     balls[idx_a].velocity = (balls[idx_a].velocity - normal * (v1_dot_normal - v1_prime_dot)) * restitution;
     balls[idx_b].velocity = (balls[idx_b].velocity - normal * (v2_dot_normal - v2_prime_dot)) * restitution;

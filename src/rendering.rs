@@ -1,7 +1,7 @@
 use sdl2::pixels::Color;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
-use crate::game::{World, Vector2D};
+use crate::game::{World, Vector2D, Ball};
 
 const HUD_X_OFFSET: i32 = 600;
 const TWO_PI: f32 = 2.0 * std::f32::consts::PI;
@@ -22,9 +22,12 @@ pub fn render(canvas: &mut Canvas<Window>, world: &World) -> Result<(), String> 
     )?;
 
     for ball in &world.balls {
+        // Traînée de mouvement
         canvas.set_draw_color(Color::RGBA(255, 255, 255, 100));
         canvas.draw_line((ball.position.x as i32, ball.position.y as i32), (ball.old_position.x as i32, ball.old_position.y as i32))?;
-        draw_filled_circle(canvas, ball.position.x as i32, ball.position.y as i32, ball.radius as i32, ball.color)?;
+        
+        // Dessiner la balle avec rotation
+        draw_ball_with_rotation(canvas, ball)?;
     }
 
     // Draw HUD background and separator
@@ -316,6 +319,95 @@ fn get_char_map(c: char) -> [[u8; 5]; 7] {
         ' ' => [[0; 5]; 7],
         _ => [[0; 5]; 7], // Blank for unknown chars
     }
+}
+
+/// Dessine une balle avec un indicateur de rotation
+fn draw_ball_with_rotation(canvas: &mut Canvas<Window>, ball: &Ball) -> Result<(), String> {
+    let cx = ball.position.x as i32;
+    let cy = ball.position.y as i32;
+    let radius = ball.radius as i32;
+    
+    // 1. Dessiner le cercle rempli (corps de la balle)
+    draw_filled_circle(canvas, cx, cy, radius, ball.color)?;
+    
+    // 2. Dessiner le contour fin (1px plus foncé)
+    let outline_color = Color::RGB(
+        (ball.color.r as i32 - 40).max(0) as u8,
+        (ball.color.g as i32 - 40).max(0) as u8,
+        (ball.color.b as i32 - 40).max(0) as u8,
+    );
+    draw_circle_outline(canvas, cx, cy, radius, outline_color)?;
+    
+    // 3. Dessiner deux lignes diamétrales qui tournent avec la balle
+    let inner_radius = (ball.radius * 0.7) as f32;
+    
+    // Première ligne (angle de rotation)
+    let (sin_r, cos_r) = ball.rotation.sin_cos();
+    let x1 = ball.position.x + cos_r * inner_radius;
+    let y1 = ball.position.y + sin_r * inner_radius;
+    let x2 = ball.position.x - cos_r * inner_radius;
+    let y2 = ball.position.y - sin_r * inner_radius;
+    
+    // Deuxième ligne perpendiculaire
+    let x3 = ball.position.x - sin_r * inner_radius;
+    let y3 = ball.position.y + cos_r * inner_radius;
+    let x4 = ball.position.x + sin_r * inner_radius;
+    let y4 = ball.position.y - cos_r * inner_radius;
+    
+    // Couleur des lignes (plus sombre)
+    let line_color = Color::RGB(
+        (ball.color.r as i32 - 60).max(0) as u8,
+        (ball.color.g as i32 - 60).max(0) as u8,
+        (ball.color.b as i32 - 60).max(0) as u8,
+    );
+    canvas.set_draw_color(line_color);
+    canvas.draw_line((x1 as i32, y1 as i32), (x2 as i32, y2 as i32))?;
+    canvas.draw_line((x3 as i32, y3 as i32), (x4 as i32, y4 as i32))?;
+    
+    // 4. Point lumineux sur le bord (comme un reflet qui tourne)
+    let highlight_dist = ball.radius * 0.6;
+    let highlight_angle = ball.rotation + 0.5; // Légèrement décalé
+    let hx = ball.position.x + highlight_angle.cos() * highlight_dist;
+    let hy = ball.position.y + highlight_angle.sin() * highlight_dist;
+    
+    let highlight_color = Color::RGB(
+        (ball.color.r as i32 + 60).min(255) as u8,
+        (ball.color.g as i32 + 60).min(255) as u8,
+        (ball.color.b as i32 + 60).min(255) as u8,
+    );
+    draw_filled_circle(canvas, hx as i32, hy as i32, 2, highlight_color)?;
+    
+    Ok(())
+}
+
+/// Dessine le contour d'un cercle (algorithme de Bresenham)
+fn draw_circle_outline(canvas: &mut Canvas<Window>, cx: i32, cy: i32, radius: i32, color: Color) -> Result<(), String> {
+    canvas.set_draw_color(color);
+    
+    let mut x = radius;
+    let mut y = 0;
+    let mut err = 0;
+    
+    while x >= y {
+        // Dessiner les 8 points symétriques
+        canvas.draw_point((cx + x, cy + y))?;
+        canvas.draw_point((cx + y, cy + x))?;
+        canvas.draw_point((cx - y, cy + x))?;
+        canvas.draw_point((cx - x, cy + y))?;
+        canvas.draw_point((cx - x, cy - y))?;
+        canvas.draw_point((cx - y, cy - x))?;
+        canvas.draw_point((cx + y, cy - x))?;
+        canvas.draw_point((cx + x, cy - y))?;
+        
+        y += 1;
+        err += 1 + 2 * y;
+        if 2 * (err - x) + 1 > 0 {
+            x -= 1;
+            err += 1 - 2 * x;
+        }
+    }
+    
+    Ok(())
 }
 
 fn draw_filled_circle(canvas: &mut Canvas<Window>, center_x: i32, center_y: i32, radius: i32, color: Color) -> Result<(), String> {
