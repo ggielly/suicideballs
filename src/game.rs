@@ -6,6 +6,7 @@ use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign};
 // Constantes précalculées pour éviter les appels répétés
 const PI: f32 = std::f32::consts::PI;
 const TWO_PI: f32 = 2.0 * PI;
+pub const TRAIL_LENGTH: usize = 36; // Longueur de la traînée (triplée)
 
 // --- Gravity ---
 #[derive(Debug)]
@@ -38,15 +39,15 @@ impl Default for Config {
             sim_width: 600,
             screen_height: 800,
             max_balls: 50,
-            centripetal_gravity: 0.05,
-            vertical_gravity: 0.1,
+            centripetal_gravity: 0.03,  // Réduit
+            vertical_gravity: 0.06,     // Réduit significativement
             circle_radius: 250.0,
             circle_thickness: 20.0,
             circle_rotation_speed: 0.00665,
             circle_gap_angle: std::f32::consts::FRAC_PI_4,
             ball_radius: 15.0,
-            max_velocity: 15.0, // Limite de vitesse
-            grid_cell_size: 40.0, // ~2x le diamètre des balles
+            max_velocity: 15.0,
+            grid_cell_size: 40.0,
         }
     }
 }
@@ -132,12 +133,13 @@ impl Vector2D {
 
 pub struct Ball {
     pub position: Vector2D,
-    pub old_position: Vector2D, // For trails
+    pub old_position: Vector2D,
+    pub trail: Vec<Vector2D>,   // Historique des positions pour la traînée
     pub velocity: Vector2D,
     pub acceleration: Vector2D,
     pub radius: f32,
-    pub rotation: f32,          // Angle de rotation actuel (radians)
-    pub angular_velocity: f32,  // Vitesse de rotation (radians/frame)
+    pub rotation: f32,
+    pub angular_velocity: f32,
     pub color: Color,
 }
 
@@ -170,8 +172,8 @@ pub fn initialize_world(config: Config) -> World {
         balls,
         circle_center,
         circle_angle: 0.0,
-        bounciness: 0.95,  // Augmenté pour plus de rebond
-        friction: 0.998,   // Moins de friction pour garder l'énergie
+        bounciness: 0.98,  // Encore plus de rebond
+        friction: 0.999,   // Très peu de friction
         config,
         gravity_mode: GravityMode::Vertical,
         balls_to_spawn: 2,
@@ -200,6 +202,7 @@ fn create_random_ball_with_rng(config: &Config, rng: &mut ThreadRng, circle_cent
     Ball {
         position,
         old_position: position,
+        trail: Vec::with_capacity(TRAIL_LENGTH),
         velocity: Vector2D { x: rng.gen_range(-2.0..2.0), y: rng.gen_range(-2.0..2.0) },
         acceleration: Vector2D::default(),
         radius,
@@ -248,6 +251,12 @@ pub fn update_world(world: &mut World) {
         ball.old_position = ball.position;
         ball.position += ball.velocity;
         ball.acceleration = Vector2D::default();
+        
+        // Mettre à jour la traînée (ajouter la position actuelle)
+        ball.trail.push(ball.old_position);
+        if ball.trail.len() > TRAIL_LENGTH {
+            ball.trail.remove(0);
+        }
         
         // Mettre à jour la rotation
         ball.rotation = (ball.rotation + ball.angular_velocity) % TWO_PI;

@@ -1,7 +1,7 @@
 use sdl2::pixels::Color;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
-use crate::game::{World, Vector2D, Ball};
+use crate::game::{World, Vector2D, Ball, TRAIL_LENGTH};
 
 const HUD_X_OFFSET: i32 = 600;
 const TWO_PI: f32 = 2.0 * std::f32::consts::PI;
@@ -22,9 +22,8 @@ pub fn render(canvas: &mut Canvas<Window>, world: &World) -> Result<(), String> 
     )?;
 
     for ball in &world.balls {
-        // Traînée de mouvement
-        canvas.set_draw_color(Color::RGBA(255, 255, 255, 100));
-        canvas.draw_line((ball.position.x as i32, ball.position.y as i32), (ball.old_position.x as i32, ball.old_position.y as i32))?;
+        // Dessiner la traînée avec dégradé de couleur
+        draw_trail(canvas, ball)?;
         
         // Dessiner la balle avec rotation
         draw_ball_with_rotation(canvas, ball)?;
@@ -319,6 +318,119 @@ fn get_char_map(c: char) -> [[u8; 5]; 7] {
         ' ' => [[0; 5]; 7],
         _ => [[0; 5]; 7], // Blank for unknown chars
     }
+}
+
+/// Dessine la traînée d'une balle avec effet comète (dégradé de largeur et couleur)
+fn draw_trail(canvas: &mut Canvas<Window>, ball: &Ball) -> Result<(), String> {
+    let trail_len = ball.trail.len();
+    if trail_len < 2 {
+        return Ok(());
+    }
+    
+    let base_r = ball.color.r as f32;
+    let base_g = ball.color.g as f32;
+    let base_b = ball.color.b as f32;
+    let ball_diameter = ball.radius * 2.0;
+    
+    // Dessiner chaque segment de la traînée
+    for i in 1..trail_len {
+        let progress = i as f32 / trail_len as f32; // 0.0 (début) -> 1.0 (fin, près de la balle)
+        
+        let p1 = ball.trail[i - 1];
+        let p2 = ball.trail[i];
+        
+        // Calculer la direction du segment
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+        let seg_len = (dx * dx + dy * dy).sqrt();
+        
+        if seg_len < 0.5 {
+            continue; // Segment trop court
+        }
+        
+        // Normale perpendiculaire au segment
+        let nx = -dy / seg_len;
+        let ny = dx / seg_len;
+        
+        // Largeur du segment (de 0 au début à diamètre complet à la fin)
+        let width_start = (i - 1) as f32 / trail_len as f32 * ball_diameter;
+        let width_end = progress * ball_diameter;
+        
+        // Dessiner des lignes parallèles pour remplir la largeur avec dégradé
+        let max_offset = (width_end * 0.5) as i32;
+        
+        for offset in -max_offset..=max_offset {
+            let offset_f = offset as f32;
+            let offset_ratio = if max_offset > 0 { 
+                1.0 - (offset_f.abs() / max_offset as f32) 
+            } else { 
+                1.0 
+            };
+            
+            // Dégradé radial: plus lumineux au centre, plus sombre sur les bords
+            let radial_fade = offset_ratio * offset_ratio; // Courbe quadratique pour effet plus doux
+            
+            // Dégradé longitudinal: de transparent à opaque
+            let alpha = (progress * radial_fade * 220.0) as u8;
+            let brightness = 0.2 + progress * 0.8 * radial_fade;
+            
+            let r = (base_r * brightness).min(255.0) as u8;
+            let g = (base_g * brightness).min(255.0) as u8;
+            let b = (base_b * brightness).min(255.0) as u8;
+            
+            canvas.set_draw_color(Color::RGBA(r, g, b, alpha));
+            
+            // Calculer la largeur à chaque extrémité du segment
+            let w1_ratio = width_start / ball_diameter.max(1.0);
+            let w2_ratio = width_end / ball_diameter.max(1.0);
+            
+            // Limiter l'offset selon la largeur à chaque point
+            let offset1 = (offset_f * w1_ratio).clamp(-width_start * 0.5, width_start * 0.5);
+            let offset2 = offset_f;
+            
+            let x1 = p1.x + nx * offset1;
+            let y1 = p1.y + ny * offset1;
+            let x2 = p2.x + nx * offset2;
+            let y2 = p2.y + ny * offset2;
+            
+            canvas.draw_line(
+                (x1 as i32, y1 as i32),
+                (x2 as i32, y2 as i32)
+            )?;
+        }
+    }
+    
+    // Connecter la traînée à la position actuelle avec un segment large
+    if let Some(last) = ball.trail.last() {
+        let dx = ball.position.x - last.x;
+        let dy = ball.position.y - last.y;
+        let seg_len = (dx * dx + dy * dy).sqrt();
+        
+        if seg_len > 0.5 {
+            let nx = -dy / seg_len;
+            let ny = dx / seg_len;
+            let max_offset = (ball_diameter * 0.5) as i32;
+            
+            for offset in -max_offset..=max_offset {
+                let offset_f = offset as f32;
+                let offset_ratio = 1.0 - (offset_f.abs() / max_offset.max(1) as f32);
+                let radial_fade = offset_ratio * offset_ratio;
+                
+                let alpha = (radial_fade * 240.0) as u8;
+                let r = (base_r * radial_fade).min(255.0) as u8;
+                let g = (base_g * radial_fade).min(255.0) as u8;
+                let b = (base_b * radial_fade).min(255.0) as u8;
+                
+                canvas.set_draw_color(Color::RGBA(r, g, b, alpha));
+                canvas.draw_line(
+                    (last.x as i32 + (nx * offset_f) as i32, last.y as i32 + (ny * offset_f) as i32),
+                    (ball.position.x as i32 + (nx * offset_f) as i32, ball.position.y as i32 + (ny * offset_f) as i32)
+                )?;
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 /// Dessine une balle avec un indicateur de rotation
